@@ -229,7 +229,7 @@ function getAccessToken() {
   var clientId = scriptProperties.getProperty('client_id');
   var clientSecret = scriptProperties.getProperty('client_secret');
   var redirect_uri = scriptProperties.getProperty('redirect_uri');
-  var authCode = "GUB0CQ83EAOPGLVRGTVAOIUS7I1QP6UMMJ1H69CREA0BUTN38IVI0I8D8HLEVNAE";
+  var authCode = scriptProperties.getProperty('authorization_code');
 
   const url = 'https://api.hh.ru/token';
   
@@ -360,27 +360,5 @@ function getVacIds() {
       appendDataToColumn(sheet, 'vacancy_id', vacId);
     }
   }
-
-  
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 }
 
-
-function test_hh() {
-  getNegotiations("128172358");
-}
