@@ -29,6 +29,11 @@ function checkSetting() {
 
     var vacancy_data = getVacansyId(vacancy_id);
 
+    if (!vacancy_data) {
+      writeDataByColumnNameAndRowNumber(sheet, 'status_api', i + 1, 'API Error: ' + getCurrentFormattedDate());
+      continue;
+    }
+
     var name = vacancy_data['name'];
 
     var experience = vacancy_data['experience']['name'];
@@ -110,11 +115,12 @@ function getResume() {
     //Utilities.sleep(10000)
 
     //функция собирает отклики
-    var datas_v = getNegotiations(vacancy_id); 
+    var datas_v = getNegotiations(vacancy_id);
     //Logger.log(datas_v);
 
     if (datas_v == null) {
-      return
+      writeDataByColumnNameAndRowNumber(sheet, 'status_api', i + 1, 'API Error: ' + getCurrentFormattedDate());
+      continue;
     }
     
     const typeValue = datas_v?.[0]?.type;
@@ -165,6 +171,11 @@ function getResume() {
       }
 
       var experience_json = getResumeId(resume_id);
+
+      if (!experience_json) {
+        Logger.log('Failed to fetch resume: ' + resume_id);
+        continue;
+      }
 
       experience = ''
       for (var exp of experience_json['experience']) {

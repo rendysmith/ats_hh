@@ -1,28 +1,57 @@
-function validAccessToken() {
+/**
+ * Выполняет авторизованный GET-запрос к API HH.ru с автоматическим рефрешем токена при 403 token_expired.
+ * @param {string} url - URL для запроса
+ * @return {object|null} - JSON-ответ или null при ошибке
+ */
+function hhFetch(url) {
   var scriptProperties = PropertiesService.getScriptProperties();
-
   var access_token = scriptProperties.getProperty('access_token');
-  
-  const url = 'https://api.hh.ru/me';
 
-  // Выполняем GET-запрос
-  var response = UrlFetchApp.fetch(url, {
-    method: 'GET',
+  function doFetch(token) {
+    return UrlFetchApp.fetch(url, {
+      method: 'GET',
       headers: {
-      "Authorization": "Bearer " + access_token, // токен работодателя
-      "User-Agent": "YourApp/1.0 (anku@sidorinlab.ru)" // обязательный контакт
-    },
-    muteHttpExceptions: true // Не выбрасывать исключения при ошибках HTTP
-  });
+        "Authorization": "Bearer " + token,
+        "User-Agent": "YourApp/1.0 (anku@sidorinlab.ru)"
+      },
+      muteHttpExceptions: true
+    });
+  }
 
+  var response = doFetch(access_token);
   var RCode = response.getResponseCode();
-  Logger.log(RCode); 
-
-  // Получаем JSON-ответ
   var rJson = JSON.parse(response.getContentText());
-  Logger.log(rJson);
-  Logger.log(rJson.email);
 
+  // Token expired -> refresh -> retry once
+  if (RCode === 403) {
+    var err = rJson.errors?.[0];
+    if (err?.value === 'token_expired') {
+      Logger.log('Access token expired, refreshing...');
+      var refreshResult = refreshHhAccessToken();
+      if (refreshResult) {
+        var newToken = scriptProperties.getProperty('access_token');
+        response = doFetch(newToken);
+        RCode = response.getResponseCode();
+        rJson = JSON.parse(response.getContentText());
+      }
+    }
+  }
+
+  if (RCode !== 200) {
+    Logger.log('HH API error: ' + RCode + ' ' + JSON.stringify(rJson));
+    return null;
+  }
+
+  return rJson;
+}
+
+function validAccessToken() {
+  var result = hhFetch('https://api.hh.ru/me');
+  if (result) {
+    Logger.log(result);
+    Logger.log(result.email);
+  }
+  return result;
 }
 
 function refreshHhAccessToken() {
@@ -73,37 +102,15 @@ function refreshHhAccessToken() {
 }
 
 function getResumeId(resumeId) {
-  // Получаем сервис свойств скрипта.
-  var scriptProperties = PropertiesService.getScriptProperties();
-  // Получаем значение по ключу 'access_token'.
-  var access_token = scriptProperties.getProperty('access_token');
-
   var url = "https://api.hh.ru/resumes/" + resumeId;
 
   try {
-    // Выполняем GET-запрос
-    var response = UrlFetchApp.fetch(url, {
-      method: 'GET',
-        headers: {
-        "Authorization": "Bearer " + access_token, // токен работодателя
-        "User-Agent": "YourApp/1.0 (anku@sidorinlab.ru)" // обязательный контакт
-      },
-      muteHttpExceptions: true // Не выбрасывать исключения при ошибках HTTP
-    });
+    var rJson = hhFetch(url);
 
-    // Получаем JSON-ответ
-    var rJson = JSON.parse(response.getContentText());
-    
-    // Выводим JSON в консоль (аналог pprint)
-    //Logger.log(JSON.stringify(rJson, null, 2));
-
-    // Выводим код ответа
-    //Logger.log('Code: ' + response.getResponseCode());
-
-    // Проверяем, если код ответа 403
-    if (response.getResponseCode() == 403) {
-      Logger.log('- Error: ' + JSON.stringify(rJson.errors));
+    if (!rJson) {
+      return null;
     }
+
     return rJson;
 
   } catch (e) {
@@ -114,53 +121,20 @@ function getResumeId(resumeId) {
 
 function getNegotiations(vacancyId) {
   Logger.log('***************** getNegotiations *****************')
-  // Получаем сервис свойств скрипта.
-  var scriptProperties = PropertiesService.getScriptProperties();
-  // Получаем значение по ключу 'access_token'.
-  var access_token = scriptProperties.getProperty('access_token');
-
-  //var url = "https://api.hh.ru/negotiations?vacancy_id=" + vacancyId + "&per_page=50";
   var url = "https://api.hh.ru/negotiations/response?vacancy_id=" + vacancyId + "&per_page=50";
 
   try {
-    // Выполняем GET-запрос
-    var response = UrlFetchApp.fetch(url, {
-      method: 'GET',
-        headers: {
-        "Authorization": "Bearer " + access_token, // токен работодателя
-        "User-Agent": "YourApp/1.0 (anku@sidorinlab.ru)" // обязательный контакт
-      },
-      muteHttpExceptions: true // Не выбрасывать исключения при ошибках HTTP
-    });
+    var rJson = hhFetch(url);
 
-    // Получаем JSON-ответ
-    var rJson = JSON.parse(response.getContentText());
-    Logger.log(rJson);
+    if (!rJson) {
+      return null;
+    }
 
-    var RCode = response.getResponseCode()
-    Logger.log('RCode: ' + RCode)
-
-    if (RCode != 200) {
-      var errorsArray = rJson.errors[0];
-      Logger.log(errorsArray);
-      var ErrorValue = errorsArray['value'];
-      var ErrorType = errorsArray['type'];
-
-      if (RCode == 400 || RCode == 403) {
-        Logger.log('Error HH');
-
-        if (ErrorValue == 'token_expired') {
-          Logger.log('Время жизни access_token завершилось, необходимо получить');
-          refreshHhAccessToken();
-          Logger.log('access_token обновлен.')
-          return null
-        }
-      }
-
-      else if (RCode == 404) {
-        Logger.log('- Error 404');
-        Logger.log(errorsArray);
-        return {['items']: []};
+    if (rJson.errors) {
+      var err = rJson.errors[0];
+      if (err?.value === 'token_expired') {
+        // Already retried in hhFetch, if still failing return null
+        return null;
       }
     }
 
@@ -181,26 +155,12 @@ function getVacansyId(vacancyId) {
   var url = 'https://api.hh.ru/vacancies/' + vacancyId;
 
   try {
-    // Выполняем GET-запрос
-    var response = UrlFetchApp.fetch(url, {
-      method: 'GET',
-      muteHttpExceptions: true // Не выбрасывать исключения при ошибках HTTP
-    });
+    var rJson = hhFetch(url);
 
-    // Получаем JSON-ответ
-    var rJson = JSON.parse(response.getContentText());
-    
-    // Выводим JSON в консоль (аналог pprint)
-    //Logger.log(JSON.stringify(rJson, null, 2));
-
-    // Выводим код ответа
-    //Logger.log('Code: ' + response.getResponseCode());
-
-    // Проверяем, если код ответа 403
-    var RCode = response.getResponseCode()
-    if (response.getResponseCode() == 403) {
-      Logger.log('- Error: ' + RCode  + " " + JSON.stringify(rJson.errors));
+    if (!rJson) {
+      return null;
     }
+
     return rJson;
 
   } catch (e) {
@@ -261,11 +221,11 @@ function getAccessToken() {
     const statusCode = response.getResponseCode();
     const responseBody = response.getContentText();
     const rJson = JSON.parse(responseBody);
-    
+
     Logger.log('Status Code: ' + statusCode);
     Logger.log('Response: ' + responseBody);
     Logger.log('Json: ' + rJson);
-    
+
     if (statusCode === 400) {
       if (rJson.error_description === 'code has already been used') {
         Logger.log('Код уже был использован (его можно использовать только один раз).');
@@ -275,11 +235,17 @@ function getAccessToken() {
         Logger.log('Код истёк.');
       }
     }
-    
-    scriptProperties.setProperty('access_token', result.access_token);
-    scriptProperties.setProperty('refresh_token', result.refresh_token);
-    
-  
+
+    if (statusCode === 200 && rJson.access_token && rJson.refresh_token) {
+      scriptProperties.setProperty('access_token', rJson.access_token);
+      scriptProperties.setProperty('refresh_token', rJson.refresh_token);
+
+      const currentTime = new Date().getTime();
+      scriptProperties.setProperty('expires_in', currentTime + Number(rJson.expires_in));
+
+      Logger.log('Токены успешно получены и сохранены.');
+    }
+
     return rJson;
   } catch (e) {
     Logger.log('An error occurred: ' + e.toString());
@@ -290,52 +256,29 @@ function getAccessToken() {
 function getVacIds() {
   //Получаем все ID доступных вакансий и вносим с таблицу если они отсутствуют.
 
-  var scriptProperties = PropertiesService.getScriptProperties();
-  // Получаем значение по ключу 'access_token'.
-  var access_token = scriptProperties.getProperty('access_token');
+  var me = hhFetch('https://api.hh.ru/me');
+  if (!me) {
+    return;
+  }
 
-  var headers = {
-      "Authorization": "Bearer " + access_token, // токен работодателя
-      "User-Agent": "YourApp/1.0 (anku@sidorinlab.ru)" // обязательный контакт
-    }
-
-  var url = 'https://api.hh.ru/me';
-
-  // Выполняем GET-запрос
-  var response = UrlFetchApp.fetch(url, {
-    method: 'GET',
-      headers: headers,
-    muteHttpExceptions: true // Не выбрасывать исключения при ошибках HTTP
-  });
-
-  var rJson = JSON.parse(response.getContentText());
-  var RCode = response.getResponseCode();
-
-  Logger.log(rJson);
-
-  var employer_id = rJson['employer']['id']
-
+  var employer_id = me['employer']['id'];
   Logger.log(employer_id);
 
-  var url_id = 'https://api.hh.ru/vacancies?employer_id=' + employer_id;
-  var response = UrlFetchApp.fetch(url_id, {
-    method: 'GET',
-    muteHttpExceptions: true // Не выбрасывать исключения при ошибках HTTP
-  });
+  var vacancies = hhFetch('https://api.hh.ru/vacancies?employer_id=' + employer_id);
+  if (!vacancies) {
+    return;
+  }
+  Logger.log(vacancies);
 
-  var rJson_id = JSON.parse(response.getContentText());
-  Logger.log(rJson_id);
-
-  var vacansyIds = []
-
-  for (var i of rJson_id['items']) {
-    vacansyIds.push(i['id'])
+  var vacansyIds = [];
+  for (var i of vacancies['items']) {
+    vacansyIds.push(i['id']);
   }
 
   Logger.log(vacansyIds);
 
   if (vacansyIds.length == 0) {
-    return
+    return;
   }
 
   var datasS = getData('prompts');
@@ -344,13 +287,12 @@ function getVacIds() {
   Logger.log(data);
 
   var ids = [];
-
   for (let i = 1; i < data.length; i++) {
     ids.push(data[i][0]);
   }
 
   if (ids.length == 0) {
-    return
+    return;
   }
 
   Logger.log(ids);
