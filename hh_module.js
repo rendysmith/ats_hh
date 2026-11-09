@@ -177,8 +177,8 @@ function getCode() {
 
   var urlContent = "https://hh.ru/oauth/authorize?response_type=code&client_id=%s&redirect_uri=%s"
 
-  var client_id = scriptProperties.getProperty('client_id'); 
-  var redirectUri = scriptProperties.getProperty('redirect_uri'); 
+  var client_id = scriptProperties.getProperty('client_id');
+  var redirectUri = scriptProperties.getProperty('redirect_uri');
   var url = Utilities.formatString(urlContent, client_id, redirectUri)
   Logger.log(url);
   return url;
@@ -192,7 +192,7 @@ function getAccessToken() {
   var authCode = scriptProperties.getProperty('authorization_code');
 
   const url = 'https://api.hh.ru/token';
-  
+
   // const payload = {
   //   'grant_type': 'authorization_code',
   //   'client_id': clientId,
@@ -215,7 +215,7 @@ function getAccessToken() {
     },
     'payload': payload
   };
-  
+
   try {
     const response = UrlFetchApp.fetch(url, options);
     const statusCode = response.getResponseCode();
@@ -302,5 +302,13 @@ function getVacIds() {
       appendDataToColumn(sheet, 'vacancy_id', vacId);
     }
   }
+
 }
 
+function getActiveHhToken() {
+  return PropertiesService.getScriptProperties().getProperty('access_token');
+}
+
+function test_hh() {
+  getNegotiations("128172358");
+}
